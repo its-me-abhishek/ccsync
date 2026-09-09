@@ -31,15 +31,20 @@ describe('DateTimePicker', () => {
       name: /calender-button/i,
     });
 
+    const calendarCaption = new Date().toLocaleString('en-US', {
+      month: 'long',
+      year: 'numeric',
+    });
+
     // Open popover
     await user.click(triggerButton);
     expect(screen.getByRole('dialog')).toBeInTheDocument(); // Popover content is a dialog
-    expect(screen.getByText(/February 2026/)).toBeInTheDocument(); // Check for specific content inside the calendar
+    expect(screen.getByText(calendarCaption)).toBeInTheDocument();
 
     // Close popover using Escape key
     fireEvent.keyDown(document, { key: 'Escape' });
     await waitFor(() => {
-      expect(screen.queryByText(/February 2026/)).not.toBeInTheDocument(); // Check for absence of specific content
+      expect(screen.queryByText(calendarCaption)).not.toBeInTheDocument();
     });
   });
 
@@ -59,9 +64,14 @@ describe('DateTimePicker', () => {
     const dateToSelect = screen.getByRole('gridcell', { name: '15' });
     await user.click(dateToSelect);
 
+    const calendarCaption = new Date().toLocaleString('en-US', {
+      month: 'long',
+      year: 'numeric',
+    });
+
     // Expect the popover to close after selecting a date
     await waitFor(() => {
-      expect(screen.queryByText(/February 2026/)).not.toBeInTheDocument();
+      expect(screen.queryByText(calendarCaption)).not.toBeInTheDocument();
     });
 
     // Check if onDateTimeChange was called with the correct date (year, month, and day)
