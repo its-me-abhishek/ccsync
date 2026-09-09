@@ -1,4 +1,10 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { TaskDialog } from '../TaskDialog';
 import { Task, EditTaskState } from '../../../utils/types';
 
@@ -636,6 +642,394 @@ describe('TaskDialog Component', () => {
           '2024-12-31'
         );
       }
+    });
+
+    const otherDateFields = [
+      {
+        label: 'Wait:',
+        editingKey: 'isEditingWaitDate' as const,
+        valueKey: 'editedWaitDate' as const,
+        saveHandler: 'onSaveWaitDate' as const,
+        initial: '2024-12-15',
+        nextValue: '2025-01-10T00:00:00.000Z',
+      },
+      {
+        label: 'Start:',
+        editingKey: 'isEditingStartDate' as const,
+        valueKey: 'editedStartDate' as const,
+        saveHandler: 'onSaveStartDate' as const,
+        initial: '2024-12-01',
+        nextValue: '2025-01-02T00:00:00.000Z',
+      },
+      {
+        label: 'End:',
+        editingKey: 'isEditingEndDate' as const,
+        valueKey: 'editedEndDate' as const,
+        saveHandler: 'onSaveEndDate' as const,
+        initial: '2024-12-31',
+        nextValue: '2025-02-01T00:00:00.000Z',
+      },
+      {
+        label: 'Entry:',
+        editingKey: 'isEditingEntryDate' as const,
+        valueKey: 'editedEntryDate' as const,
+        saveHandler: 'onSaveEntryDate' as const,
+        initial: '2024-11-01',
+        nextValue: '2024-11-15T00:00:00.000Z',
+      },
+    ];
+
+    test.each(otherDateFields)(
+      'should enable $label date editing mode',
+      ({ label, editingKey, valueKey, initial }) => {
+        render(<TaskDialog {...defaultProps} isOpen={true} />);
+
+        const row = screen.getByText(label).closest('tr') as HTMLElement;
+        const editButton = within(row).getByLabelText('edit');
+        fireEvent.click(editButton);
+
+        expect(defaultProps.onUpdateState).toHaveBeenCalledWith({
+          [editingKey]: true,
+          [valueKey]: initial,
+        });
+      }
+    );
+
+    test.each(otherDateFields)(
+      'should save $label date changes',
+      ({ label, editingKey, valueKey, saveHandler, nextValue }) => {
+        const editingState = {
+          ...mockEditState,
+          [editingKey]: true,
+          [valueKey]: nextValue,
+        };
+
+        render(
+          <TaskDialog
+            {...defaultProps}
+            isOpen={true}
+            editState={editingState}
+          />
+        );
+
+        const row = screen.getByText(label).closest('tr') as HTMLElement;
+        fireEvent.click(within(row).getByLabelText('save'));
+
+        expect(defaultProps[saveHandler]).toHaveBeenCalledWith(
+          mockTask,
+          nextValue
+        );
+        expect(defaultProps.onUpdateState).toHaveBeenCalledWith({
+          [editingKey]: false,
+        });
+      }
+    );
+
+    test.each(otherDateFields)(
+      'should cancel $label date editing and restore the original value',
+      ({ label, editingKey, valueKey, saveHandler, initial }) => {
+        const editingState = {
+          ...mockEditState,
+          [editingKey]: true,
+          [valueKey]: '2099-01-01',
+        };
+
+        render(
+          <TaskDialog
+            {...defaultProps}
+            isOpen={true}
+            editState={editingState}
+          />
+        );
+
+        const row = screen.getByText(label).closest('tr') as HTMLElement;
+        fireEvent.click(within(row).getByLabelText('cancel'));
+
+        expect(defaultProps.onUpdateState).toHaveBeenCalledWith({
+          [valueKey]: initial,
+          [editingKey]: false,
+        });
+        expect(defaultProps[saveHandler]).not.toHaveBeenCalled();
+      }
+    );
+
+    test('should still enter wait-date edit mode when wait is empty', () => {
+      const taskWithNoWait = { ...mockTask, wait: '' };
+      render(
+        <TaskDialog {...defaultProps} task={taskWithNoWait} isOpen={true} />
+      );
+
+      const row = screen.getByText('Wait:').closest('tr') as HTMLElement;
+      fireEvent.click(within(row).getByLabelText('edit'));
+
+      expect(defaultProps.onUpdateState).toHaveBeenCalledWith({
+        isEditingWaitDate: true,
+        editedWaitDate: '',
+      });
+    });
+  });
+
+  describe('Recurrence Editing', () => {
+    test('should display None when the task has no recurrence', () => {
+      render(<TaskDialog {...defaultProps} isOpen={true} />);
+
+      const row = screen.getByText('Recur:').closest('tr') as HTMLElement;
+      expect(within(row).getByText('None')).toBeInTheDocument();
+    });
+
+    test('should display the current recurrence value', () => {
+      const recurringTask = { ...mockTask, recur: 'weekly' };
+      render(
+        <TaskDialog {...defaultProps} task={recurringTask} isOpen={true} />
+      );
+
+      const row = screen.getByText('Recur:').closest('tr') as HTMLElement;
+      expect(within(row).getByText('weekly')).toBeInTheDocument();
+    });
+
+    test('should enable recurrence editing with none as the placeholder value', () => {
+      render(<TaskDialog {...defaultProps} isOpen={true} />);
+
+      const row = screen.getByText('Recur:').closest('tr') as HTMLElement;
+      fireEvent.click(within(row).getByLabelText('edit'));
+
+      expect(defaultProps.onUpdateState).toHaveBeenCalledWith({
+        isEditingRecur: true,
+        editedRecur: 'none',
+        originalRecur: '',
+      });
+    });
+
+    test('should seed originalRecur from an existing recurrence when editing starts', () => {
+      const recurringTask = { ...mockTask, recur: 'monthly' };
+      render(
+        <TaskDialog {...defaultProps} task={recurringTask} isOpen={true} />
+      );
+
+      const row = screen.getByText('Recur:').closest('tr') as HTMLElement;
+      fireEvent.click(within(row).getByLabelText('edit'));
+
+      expect(defaultProps.onUpdateState).toHaveBeenCalledWith({
+        isEditingRecur: true,
+        editedRecur: 'monthly',
+        originalRecur: 'monthly',
+      });
+    });
+
+    test('should save the selected recurrence', () => {
+      const editingState = {
+        ...mockEditState,
+        isEditingRecur: true,
+        editedRecur: 'daily',
+        originalRecur: '',
+      };
+
+      render(
+        <TaskDialog {...defaultProps} isOpen={true} editState={editingState} />
+      );
+
+      const row = screen.getByText('Recur:').closest('tr') as HTMLElement;
+      fireEvent.click(within(row).getByLabelText('save'));
+
+      expect(defaultProps.onSaveRecur).toHaveBeenCalledWith(mockTask, 'daily');
+    });
+
+    test('should cancel recurrence editing and restore originalRecur', () => {
+      const editingState = {
+        ...mockEditState,
+        isEditingRecur: true,
+        editedRecur: 'yearly',
+        originalRecur: 'weekly',
+      };
+
+      render(
+        <TaskDialog {...defaultProps} isOpen={true} editState={editingState} />
+      );
+
+      const row = screen.getByText('Recur:').closest('tr') as HTMLElement;
+      fireEvent.click(within(row).getByLabelText('cancel'));
+
+      expect(defaultProps.onUpdateState).toHaveBeenCalledWith({
+        isEditingRecur: false,
+        editedRecur: 'weekly',
+      });
+      expect(defaultProps.onSaveRecur).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Annotations Editing', () => {
+    test('should display No Annotations when the task has none', () => {
+      render(<TaskDialog {...defaultProps} isOpen={true} />);
+
+      expect(screen.getByText('No Annotations')).toBeInTheDocument();
+    });
+
+    test('should display existing annotation descriptions', () => {
+      const annotatedTask = {
+        ...mockTask,
+        annotations: [
+          { entry: '2024-11-01T00:00:00.000Z', description: 'Follow up' },
+        ],
+      };
+
+      render(
+        <TaskDialog {...defaultProps} task={annotatedTask} isOpen={true} />
+      );
+
+      expect(screen.getByText('Follow up')).toBeInTheDocument();
+      expect(screen.queryByText('No Annotations')).not.toBeInTheDocument();
+    });
+
+    test('should enable annotations editing with the current list', () => {
+      const annotatedTask = {
+        ...mockTask,
+        annotations: [
+          { entry: '2024-11-01T00:00:00.000Z', description: 'Follow up' },
+        ],
+      };
+
+      render(
+        <TaskDialog {...defaultProps} task={annotatedTask} isOpen={true} />
+      );
+
+      const row = screen.getByText('Annotations:').closest('tr') as HTMLElement;
+      fireEvent.click(within(row).getByLabelText('edit'));
+
+      expect(defaultProps.onUpdateState).toHaveBeenCalledWith({
+        isEditingAnnotations: true,
+        editedAnnotations: annotatedTask.annotations,
+        annotationInput: '',
+      });
+    });
+
+    test('should add a trimmed annotation when Enter is pressed', () => {
+      const editingState = {
+        ...mockEditState,
+        isEditingAnnotations: true,
+        editedAnnotations: [],
+        annotationInput: '  ship it  ',
+      };
+
+      render(
+        <TaskDialog {...defaultProps} isOpen={true} editState={editingState} />
+      );
+
+      fireEvent.keyDown(
+        screen.getByPlaceholderText('Add an annotation (press enter to add)'),
+        { key: 'Enter' }
+      );
+
+      expect(defaultProps.onUpdateState).toHaveBeenCalledWith(
+        expect.objectContaining({
+          annotationInput: '',
+          editedAnnotations: [
+            expect.objectContaining({ description: 'ship it' }),
+          ],
+        })
+      );
+    });
+
+    test('should not add an annotation when Enter is pressed on whitespace', () => {
+      const editingState = {
+        ...mockEditState,
+        isEditingAnnotations: true,
+        editedAnnotations: [],
+        annotationInput: '   ',
+      };
+
+      render(
+        <TaskDialog {...defaultProps} isOpen={true} editState={editingState} />
+      );
+
+      fireEvent.keyDown(
+        screen.getByPlaceholderText('Add an annotation (press enter to add)'),
+        { key: 'Enter' }
+      );
+
+      expect(defaultProps.onUpdateState).not.toHaveBeenCalled();
+    });
+
+    test('should remove an annotation from the editing list', () => {
+      const annotation = {
+        entry: '2024-11-01T00:00:00.000Z',
+        description: 'Follow up',
+      };
+      const editingState = {
+        ...mockEditState,
+        isEditingAnnotations: true,
+        editedAnnotations: [annotation],
+        annotationInput: '',
+      };
+
+      render(
+        <TaskDialog {...defaultProps} isOpen={true} editState={editingState} />
+      );
+
+      fireEvent.click(screen.getByText('✖'));
+
+      expect(defaultProps.onUpdateState).toHaveBeenCalledWith({
+        editedAnnotations: [],
+      });
+    });
+
+    test('should save the edited annotations list', () => {
+      const editedAnnotations = [
+        { entry: '2024-11-01T00:00:00.000Z', description: 'Follow up' },
+      ];
+      const editingState = {
+        ...mockEditState,
+        isEditingAnnotations: true,
+        editedAnnotations,
+        annotationInput: '',
+      };
+
+      render(
+        <TaskDialog {...defaultProps} isOpen={true} editState={editingState} />
+      );
+
+      fireEvent.click(screen.getByLabelText('Save annotations'));
+
+      expect(defaultProps.onSaveAnnotations).toHaveBeenCalledWith(
+        mockTask,
+        editedAnnotations
+      );
+      expect(defaultProps.onUpdateState).toHaveBeenCalledWith({
+        isEditingAnnotations: false,
+        annotationInput: '',
+      });
+    });
+
+    test('should cancel annotation editing and restore the original list', () => {
+      const original = [
+        { entry: '2024-11-01T00:00:00.000Z', description: 'Keep me' },
+      ];
+      const taskWithNotes = { ...mockTask, annotations: original };
+      const editingState = {
+        ...mockEditState,
+        isEditingAnnotations: true,
+        editedAnnotations: [
+          { entry: '2024-12-01T00:00:00.000Z', description: 'Draft' },
+        ],
+        annotationInput: 'unsent',
+      };
+
+      render(
+        <TaskDialog
+          {...defaultProps}
+          task={taskWithNotes}
+          isOpen={true}
+          editState={editingState}
+        />
+      );
+
+      fireEvent.click(screen.getByLabelText('Cancel editing annotations'));
+
+      expect(defaultProps.onUpdateState).toHaveBeenCalledWith({
+        isEditingAnnotations: false,
+        editedAnnotations: original,
+        annotationInput: '',
+      });
+      expect(defaultProps.onSaveAnnotations).not.toHaveBeenCalled();
     });
   });
 
